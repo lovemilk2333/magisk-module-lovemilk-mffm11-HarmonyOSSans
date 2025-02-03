@@ -100,11 +100,18 @@ def build(force: bool = False) -> tuple[Path, bool]:
 def release(*files: Path):
     print("\ncreating release...\n")
     version = get_version()
-    release_files = " ".join(map(lambda p: str(p.absolute().resolve()), files))
+    release_files = map(lambda p: str(p.absolute().resolve()), files)
     process = run(
-        f'gh release create V{version} '
-        f'--title "V{version}" --notes "{get_last_commit_message()}" {release_files}',
-        shell=True
+        [
+            "gh",
+            "release",
+            "create",
+            f"V{version}",
+            "--title",
+            f"V{version}",
+            "--notes",
+            f"{get_last_commit_message()}",
+        ] + list(release_files)
     )
 
     assert process.returncode == 0, "failed to create release"
