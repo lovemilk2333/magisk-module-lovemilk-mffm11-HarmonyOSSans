@@ -3,6 +3,8 @@ from pathlib import Path
 from subprocess import run, PIPE
 from hashlib import sha256
 
+from functools import cache
+
 input_dir = Path("mffm11_v2024.04.04_HarmonyOSSans/")
 output_file = Path("./dist/Lovemilk-MFFMv11-HarmonyOSSans-{version}.zip")
 cache_dir = Path(".cache/")
@@ -13,14 +15,16 @@ module_prop_cache_file = cache_dir / f"{module_prop_file.name}.hash"
 
 
 def make_dir(path: Path):
-    if not path.is_dir():
-        if path.is_file():
-            path.unlink(missing_ok=True)
-        path.mkdir(parents=True, exist_ok=True)
+    if path.is_dir():
+        return
 
+    if path.exists():
+        path.unlink(missing_ok=True)
+    path.mkdir(parents=True, exist_ok=True)
 
+@cache  # 这个函数在 build 时期应该返回同一个版本号
 def get_version():
-    with (module_prop_file).open("r", encoding="u8") as fp:
+    with module_prop_file.open("r", encoding="u8") as fp:
         while line := fp.readline():
             if not line.startswith("version="):
                 continue
@@ -30,13 +34,13 @@ def get_version():
 
 
 def get_last_commit():
-    process = run("git rev-parse HEAD", stdout=PIPE)
+    process = run("git rev-parse HEAD", stdout=PIPE, shell=True)
     assert process.returncode == 0, "failed to get last commit"
     return process.stdout.decode("u8").strip()
 
 
 def get_last_commit_message():
-    process = run("git log -1 --pretty=%B", stdout=PIPE)
+    process = run("git log -1 --pretty=%B", stdout=PIPE, shell=True)
     assert process.returncode == 0, "failed to get last commit message"
     return process.stdout.decode("u8").strip()
 
@@ -49,12 +53,12 @@ def hash_file(path: Path, *, chunk_size: int = 4096):
     return hasher.hexdigest()
 
 
-def build(force: bool = False):
+def build(force: bool = False) -> tuple[Path, bool]:
     version = get_version()
     _output_file = Path(str(output_file.absolute().resolve()).format(version=version))
 
     make_dir(_output_file.parent)
-    make_dir(commit_cache_file.parent)
+    make_dir(cache_dir)
 
     if not force and (
         _output_file.is_file()
@@ -72,7 +76,7 @@ def build(force: bool = False):
         == hash_file(module_prop_file)
     ):
         print("no changes detected, skipping build")
-        return
+        return _output_file, False
 
     # _output_file.unlink(missing_ok=True)
 
@@ -90,25 +94,29 @@ def build(force: bool = False):
     module_prop_cache_file.write_text(hash_file(module_prop_file))
 
     print(f"build completed, output file name: {_output_file.name}")
-    return _output_file
+    return _output_file, True
 
 
 def release(*files: Path):
     print("\ncreating release...\n")
     version = get_version()
+    release_files = " ".join(map(lambda p: str(p.absolute().resolve()), files))
     process = run(
         f'gh release create V{version} '
-        f'--title "V{version}" --notes "{get_last_commit_message()}" {" ".join(map(lambda p: str(p.absolute().resolve()), files))}'
+        f'--title "V{version}" --notes "{get_last_commit_message()}" {release_files}'
     )
 
     assert process.returncode == 0, "failed to create release"
-    print("release created successfully")
+    print("\nrelease created successfully")
 
 
 if __name__ == "__main__":
-    args = tuple(map(lambda x: x.lower(), sys.argv[1:]))
+    args = tuple(map(lambda s: s.lower(), sys.argv[1:]))
 
-    release_file = build(("--force" in args or "-f" in args))
+    release_file, has_built = build(("--force" in args or "-f" in args))
 
-    if release_file is not None and ("--release" in args or "-r" in args):
+    if "--release" in args or "-r" in args:
+        if not has_built and input("no changes detected, are you sure to release? (y/N): ").lower() != "y":
+            sys.exit(0)
+
         release(release_file)
