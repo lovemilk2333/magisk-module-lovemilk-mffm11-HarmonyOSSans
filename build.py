@@ -103,7 +103,8 @@ def release(*files: Path):
     release_files = " ".join(map(lambda p: str(p.absolute().resolve()), files))
     process = run(
         f'gh release create V{version} '
-        f'--title "V{version}" --notes "{get_last_commit_message()}" {release_files}'
+        f'--title "V{version}" --notes "{get_last_commit_message()}" {release_files}',
+        shell=True
     )
 
     assert process.returncode == 0, "failed to create release"
